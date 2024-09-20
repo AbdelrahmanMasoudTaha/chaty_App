@@ -1,8 +1,9 @@
-import 'dart:developer';
-
+import 'dart:io';
+import 'package:chaty/widgets/user_img.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 final _firebase = FirebaseAuth.instance;
 
@@ -17,30 +18,60 @@ class _AuthScreenState extends State<AuthScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool _islogin = true;
   String _enterdEmail = '';
+  String _enterdUsername = '';
   String _enterdPasswoud = '';
+  File? _selectedImageFile;
+  bool _isUploading = false;
 
   void _supmit() async {
     bool vaild = _formKey.currentState!.validate();
-    if (!vaild) {
+    if (!vaild || (!_islogin && _selectedImageFile == null)) {
       return;
     }
-    if (_islogin) {
-    } else {
-      try {
+    try {
+      setState(() {
+        _isUploading = true;
+      });
+      if (_islogin) {
+        final UserCredential userCredential =
+            await _firebase.signInWithEmailAndPassword(
+          email: _enterdEmail,
+          password: _enterdPasswoud,
+        );
+      } else {
         final UserCredential userCredential =
             await _firebase.createUserWithEmailAndPassword(
           email: _enterdEmail,
           password: _enterdPasswoud,
         );
-      } on FirebaseAuthException catch (e) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message ?? 'Authentication faild.')));
+        final Reference storageRef = FirebaseStorage.instance
+            .ref()
+            .child('user_image')
+            .child('${userCredential.user!.uid}.jpg');
+        await storageRef.putFile(_selectedImageFile!);
+        final imgUrl = await storageRef.getDownloadURL();
+
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(userCredential.user!.uid)
+            .set({
+          'username': _enterdUsername,
+          'email': _enterdEmail,
+          'img_url': imgUrl,
+        });
       }
+    } on FirebaseAuthException catch (e) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message ?? 'Authentication faild.'),
+        ),
+      );
+      setState(() {
+        _isUploading = false;
+      });
     }
     _formKey.currentState!.save();
-    log(_enterdEmail);
-    log(_enterdPasswoud);
   }
 
   @override
@@ -68,6 +99,28 @@ class _AuthScreenState extends State<AuthScreen> {
                       key: _formKey,
                       child: Column(
                         children: [
+                          if (!_islogin)
+                            UserImg(
+                              onPickeImage: (pickedImg) {
+                                _selectedImageFile = pickedImg;
+                              },
+                            ),
+                          if (!_islogin)
+                            TextFormField(
+                              validator: (value) {
+                                if (value == null || value.trim().length < 4) {
+                                  return 'Please enter at least 4 character';
+                                }
+                                return null;
+                              },
+                              onSaved: (newValue) =>
+                                  _enterdUsername = newValue!,
+                              decoration: const InputDecoration(
+                                label: Text(
+                                  'Username',
+                                ),
+                              ),
+                            ),
                           TextFormField(
                             validator: (value) {
                               if (value == null ||
@@ -105,24 +158,27 @@ class _AuthScreenState extends State<AuthScreen> {
                           const SizedBox(
                             height: 20,
                           ),
-                          ElevatedButton(
-                            onPressed: _supmit,
-                            style: TextButton.styleFrom(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer),
-                            child: Text(_islogin ? 'Login' : 'Sign Up'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              setState(() {
-                                _islogin = !_islogin;
-                              });
-                            },
-                            child: Text(_islogin
-                                ? 'Create an account'
-                                : 'I allredy have an account'),
-                          ),
+                          if (_isUploading) const CircularProgressIndicator(),
+                          if (!_isUploading)
+                            ElevatedButton(
+                              onPressed: _supmit,
+                              style: TextButton.styleFrom(
+                                  backgroundColor: Theme.of(context)
+                                      .colorScheme
+                                      .primaryContainer),
+                              child: Text(_islogin ? 'Login' : 'Sign Up'),
+                            ),
+                          if (!_isUploading)
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _islogin = !_islogin;
+                                });
+                              },
+                              child: Text(_islogin
+                                  ? 'Create an account'
+                                  : 'I allredy have an account'),
+                            ),
                         ],
                       ),
                     ),
